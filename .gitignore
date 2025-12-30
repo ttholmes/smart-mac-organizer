@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.DS_Store
+*.log
+__pycache__/
+*.py[cod]
+.env
+.DS_Store
+*.log
+config.yaml
+.smart_staging/
+

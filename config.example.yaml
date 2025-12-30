@@ -1,0 +1,129 @@
+# ==============================================================================
+# SMART MAC ORGANIZER - ARQUIVO DE CONFIGURAÇÃO
+# ==============================================================================
+
+app:
+  # Se 'true', apenas simula o que faria sem mover arquivos (bom para testar)
+  dry_run: false
+  
+  # Onde o log de execução será salvo
+  log_file: "~/Desktop/organizer_execution.log"
+  
+  # Modelo de IA (Recomendado: qwen2.5:3b pela precisão em português e JSON)
+  ollama_model: "qwen2.5:3b"
+
+# ==============================================================================
+# 🛠️ CAMINHOS DE SISTEMA
+# ==============================================================================
+paths:
+  # Deixe vazio ("") para detecção automática, ou coloque o caminho completo
+  # Exemplo: "/opt/homebrew/bin/tag"
+  tag_cli: "" 
+  tesseract: ""
+
+# ==============================================================================
+# 📂 MAPEAMENTO DE PASTAS (RAÍZES)
+# ==============================================================================
+roots:
+  # DESTINO FINAL (NUVEM)
+  # IMPORTANTE: Ajuste este caminho para o seu Google Drive ou OneDrive
+  # se quiser aproveitar de recursos como streaming de arquivos, liberando espaço em seu Mac.
+  # por exemplo, para Google Drive: ~/Library/CloudStorage/GoogleDrive-seu.email@gmail.com/Meu Drive
+  drive: "~/"
+  
+  # Atalhos para usar nas categorias abaixo (facilita a leitura)
+  docs: "{drive}/Documentos"
+  imgs: "{drive}/Imagens"
+  
+  # ORIGEM (Geralmente a pasta Downloads local)
+  local_dl: "~/Downloads"
+
+# ==============================================================================
+# 🏷️ CATEGORIAS (O Cérebro da Organização)
+# ==============================================================================
+# A IA usa o campo 'description' para decidir onde guardar o arquivo.
+# Você pode criar novas categorias ou alterar as existentes.
+
+categories:
+  # --- 1. JURÍDICO & BUROCRACIA ---
+  juridico:
+    path: "{docs}/Juridico"
+    tag: "Purple" # Cores: Red, Orange, Yellow, Green, Blue, Purple, Gray
+    description: "Procon, Processos judiciais, Advogados, Contratos Formais."
+
+  pessoal_documentos:
+    path: "{docs}/Pessoal/Documentos_Vitais"
+    tag: "Blue"
+    description: "RG, CPF, CNH, Passaporte, Certidões (Nascimento/Casamento), Título de Eleitor."
+
+  # --- 2. SAÚDE ---
+  pessoal_saude:
+    path: "{docs}/Pessoal/Saude"
+    tag: "Blue"
+    description: "Exames médicos, Resultados de Laboratório, Receitas Médicas, Carteira de Vacinação. (NÃO usar para pagamentos/recibos)."
+
+  # --- 3. FINANCEIRO ---
+  financeiro_pagamentos:
+    path: "{docs}/Financeiro/Pagamentos_Contas"
+    tag: "Red"
+    description: "Comprovantes de pagamento, Boletos bancários, Faturas de cartão, Comprovantes de Pix, Contas de luz/água."
+
+  financeiro_fiscal:
+    path: "{docs}/Financeiro/Fiscal_Impostos"
+    tag: "Red"
+    description: "Declaração de Imposto de Renda, DARF, DAS, Notas Fiscais (NF-e) emitidas."
+
+  financeiro_invest:
+    path: "{docs}/Financeiro/Banco_Investimentos"
+    tag: "Red"
+    description: "Extratos bancários, Informes de Rendimentos, Comprovantes de Ações/Cripto."
+
+  # --- 4. CARREIRA ---
+  carreira_geral:
+    path: "{docs}/Profissional/Geral"
+    tag: "Green"
+    description: "Holerites, Contracheques, Contratos de Trabalho, Currículos, Certificados."
+
+  # --- 5. SOFTWARES & INSTALADORES ---
+  softwares:
+    path: "{drive}/Softwares_Backups"
+    tag: "Yellow"
+    description: "Instaladores de programas Mac (.dmg, .pkg), arquivos ISO, Drivers e executáveis."
+
+  # --- 6. MÍDIA ---
+  midia_imagens:
+    path: "{imgs}/Organizadas"
+    tag: "Yellow"
+    description: "Fotos pessoais, Capturas de tela (Screenshots), Wallpapers, Imagens sem texto documental importante."
+
+  # --- 7. OUTROS (Caixa de Entrada) ---
+  # Tudo que a IA não tiver certeza vai para cá para sua revisão manual.
+  outros:
+    path: "{drive}/Inbox_Triagem"
+    tag: "Gray"
+    description: "Arquivos não identificados, genéricos ou que precisam de revisão humana."
+
+# ==============================================================================
+# 🚫 FILTROS (O que ignorar)
+# ==============================================================================
+ignore:
+  # Extensões temporárias de download (nunca mexer nelas, caso contrário, seus downloads podem falhar)
+  extensions: 
+    - .download
+    - .crdownload
+    - .tmp
+    - .part
+    - .lock
+
+  # Pastas que o script não deve entrar
+  directories:
+    - .git
+    - venv
+    - node_modules
+    - .Trash
+    - .smart_staging
+
+  # Arquivos de sistema ocultos
+  prefixes:
+    - .
+    - ~$

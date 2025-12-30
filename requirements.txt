@@ -1,0 +1,8 @@
+ollama==0.1.6
+pymupdf==1.23.8
+Pillow==10.2.0
+pytesseract==0.3.10
+PyYAML==6.0.1
+watchdog==4.0.0
+pyobjc-framework-Vision==10.0
+pyobjc-framework-Cocoa==10.0

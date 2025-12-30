@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Smart Mac Organizer 
+Organizador de arquivos inteligente para macOS usando AI e OCR nativo.
+Coletando arquivos baixados de sua pasta de Downloads e organizando-os em pastas específicas na nuvem (ou não) 
+(como Google Drive ou OneDrive) com base no conteúdo e metadados dos arquivos.
+Utiliza o modelo Ollama para classificação inteligente e o OCR nativo do macOS (Vision framework) 
+para extrair texto de imagens e PDFs.
+"""
+
+import sys
+import shutil
+import json
+import re
+import time
+import subprocess
+import argparse
+import logging
+import errno
+import os
+import unicodedata
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Dict, Any
+
+# --- DEPENDÊNCIAS ---
+try:
+    import fitz
+    import ollama
+    import yaml
+    from PIL import Image, ImageEnhance
+    import pytesseract
+    
+    try:
+        from Cocoa import NSURL
+        import Vision
+        APPLE_VISION_AVAILABLE = True
+    except ImportError:
+        APPLE_VISION_AVAILABLE = False
+        
+except ImportError as e:
+    sys.exit(f"❌ Erro Crítico: Dependência '{e.name}' faltando.")
+
+# --- OCR NATIVO ---
+class MacVisionOCR:
+    @staticmethod
+    def recognize_text(image_path: str) -> str:
+        if not APPLE_VISION_AVAILABLE: return ""
+        try:
+            input_url = NSURL.fileURLWithPath_(image_path)
+            request = Vision.VNRecognizeTextRequest.alloc().init()
+            request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+            request.setUsesLanguageCorrection_(True)
+            
+            handler = Vision.VNImageRequestHandler.alloc().initWithURL_options_(input_url, None)
+            success, error = handler.performRequests_error_([request], None)
+            
+            if not success: return ""
+            return "\n".join([o.topCandidates_(1).string() for o in request.results()])
+        except Exception:
+            return ""
+
+# --- CLASSE ORGANIZADORA ---
+class SmartOrganizer:
+    def __init__(self, config_path: Path):
+        self.config = self._load_config(config_path)
+        self._setup_logging()
+        self._resolve_paths()
+        self._check_dependencies()
+        
+    def _load_config(self, path: Path) -> Dict[str, Any]:
+        if not path.exists(): sys.exit(f"❌ Configuração não encontrada: {path}")
+        with open(path, 'r', encoding='utf-8') as f:
+            raw = yaml.safe_load(f)
+        
+        if 'ignore' not in raw: raw['ignore'] = {}
+        defaults = {
+            'extensions': ['.download', '.crdownload', '.tmp', '.part', '.lock'],
+            'directories': ['.git', 'venv', '__pycache__', '.Trash', 'Unsorted_Review'],
+            'prefixes': ['.', '~$']
+        }
+        for k, v in defaults.items():
+            if k not in raw['ignore']: raw['ignore'][k] = v
+        return raw
+
+    def _resolve_paths(self):
+        roots = self.config.get('roots', {})
+        resolved_roots = {}
+        for key, val in roots.items():
+            expanded = str(Path(val).expanduser())
+            for r_key, r_val in resolved_roots.items():
+                expanded = expanded.replace(f"{{{r_key}}}", r_val)
+            resolved_roots[key] = expanded
+            
+        self.categories = {}
+        for key, data in self.config['categories'].items():
+            path_str = str(Path(data['path']).expanduser())
+            for r_key, r_val in resolved_roots.items():
+                path_str = path_str.replace(f"{{{r_key}}}", r_val)
+            self.categories[key] = {
+                "path": Path(path_str),
+                "tag": data.get("tag"),
+                "desc": data.get("description", "")
+            }
+
+    def _setup_logging(self):
+        log_path = Path(self.config['app']['log_file']).expanduser()
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[logging.FileHandler(log_path), logging.StreamHandler(sys.stdout)]
+        )
+        self.logger = logging.getLogger("SmartOrganizer")
+
+    def _check_dependencies(self):
+        paths_cfg = self.config.get('paths', {})
+        self.tag_cmd = paths_cfg.get('tag_cli') or shutil.which("tag") or "/opt/homebrew/bin/tag"
+        try: ollama.list()
+        except: 
+            self.logger.error("❌ Ollama offline.")
+            sys.exit(1)
+
+    # --- HELPERS ---
+    def _normalize_string(self, text: str) -> str:
+        if not text: return ""
+        text = text.lower().strip()
+        return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+
+    def _resolve_category_key(self, ai_output: str) -> str:
+        valid_keys = list(self.categories.keys())
+        if ai_output in valid_keys: return ai_output
+        normalized_ai = self._normalize_string(ai_output)
+        for key in valid_keys:
+            if self._normalize_string(key) == normalized_ai:
+                self.logger.info(f"🔧 Corrigido: '{ai_output}' -> '{key}'")
+                return key
+        for key in valid_keys:
+            if normalized_ai in key or key in normalized_ai:
+                if len(normalized_ai) > 4: 
+                    self.logger.info(f"🔧 Aproximado: '{ai_output}' -> '{key}'")
+                    return key
+        return "outros"
+
+    # --- METADATA & CONTENT ---
+    def get_file_metadata(self, filepath: Path) -> str:
+        meta = []
+        try:
+            stat = filepath.stat()
+            created = datetime.fromtimestamp(stat.st_birthtime).strftime('%Y-%m-%d')
+            meta.append(f"System Created: {created}")
+            
+            cmd = ["mdls", "-name", "kMDItemWhereFroms", "-raw", str(filepath)]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.stdout and res.stdout != "(null)":
+                urls = re.findall(r'https?://[^\s"\')]+', res.stdout)
+                if urls:
+                    domain = urls.split('/')[1]
+                    meta.append(f"Source Domain: {domain}")
+            
+            if filepath.suffix.lower() in ['.jpg', '.jpeg', '.heic']:
+                try:
+                    with Image.open(filepath) as img:
+                        exif = img._getexif()
+                        if exif and 36867 in exif:
+                            dt = exif.split(' ').replace(':', '-')
+                            meta.append(f"EXIF Date: {dt}")
+                except: pass
+        except Exception: pass
+        return "\n".join(meta)
+
+    def _enhance_image_for_ocr(self, filepath: Path) -> str:
+        try:
+            temp_path = Path(f"/tmp/enhance_{filepath.stem}.png")
+            with Image.open(filepath) as img:
+                img = img.convert('L')
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(2.0)
+                img = img.point(lambda x: 0 if x < 140 else 255, '1')
+                img.save(temp_path)
+            return str(temp_path)
+        except: return str(filepath)
+
+    def extract_content(self, filepath: Path) -> Optional[str]:
+        text = ""
+        ext = filepath.suffix.lower()
+        
+        try:
+            if ext in ['.dmg', '.pkg', '.iso', '.zip', '.rar']:
+                return f"NOME_DO_ARQUIVO: {filepath.name}\nTIPO: Instalador de Software / Binário."
+
+            if ext in ['.gdoc', '.gsheet', '.gslides']:
+                return f"CLOUD FILE: Classifique APENAS pelo nome: '{filepath.name}'"
+
+            if ext == '.pdf':
+                with fitz.open(filepath) as doc:
+                    for i, page in enumerate(doc):
+                        if i >= 2: break 
+                        text += page.get_text() or ""
+                
+                if len(text.strip()) < 50:
+                    with fitz.open(filepath) as doc:
+                        if len(doc) > 0:
+                            pix = doc.get_pixmap(dpi=200)
+                            temp = Path(f"/tmp/ocr_{filepath.stem}.png")
+                            pix.save(temp)
+                            processed = self._enhance_image_for_ocr(temp)
+                            text += MacVisionOCR.recognize_text(processed)
+                            Path(processed).unlink(missing_ok=True)
+                            temp.unlink(missing_ok=True)
+
+            elif ext in ['.jpg', '.jpeg', '.png', '.heic', '.webp']:
+                processed = self._enhance_image_for_ocr(filepath)
+                if APPLE_VISION_AVAILABLE:
+                    text = MacVisionOCR.recognize_text(processed)
+                else:
+                    text = pytesseract.image_to_string(Image.open(processed))
+                if processed.startswith("/tmp/"): Path(processed).unlink(missing_ok=True)
+                    
+            elif ext in ['.html', '.txt', '.md']:
+                try: text = filepath.read_text(errors='ignore')
+                except: pass
+
+        except Exception as e:
+            self.logger.error(f"Erro leitura {filepath.name}: {e}")
+            return None
+            
+        return text[:5000]
+
+    # --- CÉREBRO DA IA  ---
+    def get_ai_decision(self, filepath: Path, text: str, dry_run: bool) -> Dict:
+        ref_date = datetime.now().strftime("%Y-%m-%d")
+        
+        cat_list = []
+        for k, v in self.categories.items():
+            cat_list.append(f"- ID: '{k}'\n  DESCRIÇÃO: {v['desc']}")
+        cat_context = "\n".join(cat_list)
+        
+        metadata = self.get_file_metadata(filepath)
+
+        prompt = f"""
+        [SYSTEM ROLE]
+        Você é um motor de classificação de arquivos JSON (File Classifier Engine).
+        Sua função é analisar metadados e texto OCR para categorizar documentos com precisão cirúrgica.
+        Data de Referência (Hoje): {ref_date}
+
+        [INPUT DATA]
+        Arquivo: "{filepath.name}"
+        Metadados: {metadata}
+        
+        [OCR CONTENT START]
+        {text[:4500] if text else "NENHUM TEXTO LEGÍVEL - BASEAR-SE NO NOME DO ARQUIVO E METADADOS"}
+        [OCR CONTENT END]
+
+        [CATEGORIAS DISPONÍVEIS - USE APENAS ESTAS CHAVES (IDs)]
+        {cat_context}
+
+        [PROTOCOLOS DE DECISÃO]
+        1. ANÁLISE DE EXTENSÃO:
+           - Se for .dmg, .pkg, .iso, .exe -> Categoria 'softwares'. (Ignore o texto).
+           - Se for .jpg/.png E sem texto legível -> Categoria 'midia_imagens'.
+        
+        2. ANÁLISE SEMÂNTICA (Palavras-Chave):
+           - "Procon", "Processo", "Juiz", "Advogado", "Consumidor", "Termo" -> 'juridico'.
+           - "Exame", "Hemograma", "CRM", "Diagnóstico" -> 'pessoal_saude'.
+           - "Boleto", "Recibo", "Comprovante", "Pagamento", "Pix" -> 'financeiro_pagamentos'.
+           - "Holerite", "Contracheque", "Admissão", "Relatório" -> 'carreira_geral'.
+           
+        3. EXTRAÇÃO DE DATA (Crucial):
+           - Procure a "Data do Documento" (Vencimento, Emissão, Realização).
+           - Se não achar data no texto, use a data de criação dos metadados.
+           - Formato OBRIGATÓRIO: YYYY-MM-DD.
+
+        4. REGRAS DE NOMEAÇÃO:
+           - Padronize: YYYY-MM-DD__Entidade__Tipo__Detalhe.ext
+           - Exemplo: 2023-05-20__Nubank__Fatura__Maio.pdf
+           - Remova acentos e espaços (use underline).
+
+        [OUTPUT FORMAT]
+        Retorne APENAS um objeto JSON válido. Sem markdown, sem explicações extras.
+        {{
+            "thought": "Passo 1: Extensão é PDF. Passo 2: Texto contém 'Procon'. Passo 3: Data encontrada 12/05/2024.",
+            "category": "juridico",
+            "new_name": "2024-05-12__Procon__Notificacao__Reclamacao.pdf"
+        }}
+        """
+
+        if dry_run: return {"category": "outros", "new_name": filepath.name}
+
+        try:
+            res = ollama.chat(
+                model=self.config['app']['ollama_model'], 
+                messages=[{'role': 'user', 'content': prompt}],
+                options={'temperature': 0.1} 
+            )
+            content = res['message']['content']
+            clean_content = re.sub(r'^```json\s*', '', content, flags=re.MULTILINE)
+            clean_content = re.sub(r'\s*```$', '', clean_content, flags=re.MULTILINE)
+            
+            return json.loads(clean_content.strip())
+        except Exception as e:
+            self.logger.error(f"❌ Erro na IA: {e}")
+            return {"category": "outros", "new_name": filepath.name}
+
+    # --- Fluxo de organização para evitar deadlock quando usado com Streaming de arquivos (GDrive) ---
+    def _execute_local_first_strategy(self, local_src: Path, dest_dir: Path, new_name: str, category_tag: str) -> bool:
+        try:
+            # 1. Renomear Localmente
+            if local_src.name == new_name:
+                self.logger.info(f"⏭️ Nome já correto: {new_name}")
+                local_renamed = local_src
+            else:
+                local_renamed = local_src.parent / new_name
+                if local_renamed.exists():
+                    timestamp = int(time.time())
+                    local_renamed = local_src.parent / f"{local_renamed.stem}_{timestamp}{local_renamed.suffix}"
+                
+                try:
+                    os.rename(local_src, local_renamed)
+                    self.logger.info(f"🏷️ Renomeado Local: {local_renamed.name}")
+                except OSError as e:
+                    self.logger.error(f"❌ Falha ao renomear localmente: {e}")
+                    return False
+
+            # 2. Upload para Nuvem
+            if not dest_dir.exists():
+                try: dest_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    self.logger.error(f"❌ Erro criando pasta destino: {e}")
+                    return False
+
+            final_cloud_path = dest_dir / local_renamed.name
+            
+            try:
+                shutil.copy2(local_renamed, final_cloud_path)
+                self.logger.info(f"☁️ Upload Concluído: {final_cloud_path.name}")
+            except OSError as e:
+                self.logger.error(f"❌ Erro no Upload: {e}")
+                return False
+
+            # 3. Tagging
+            if category_tag and self.tag_cmd:
+                try:
+                    time.sleep(2.0)
+                    subprocess.run([self.tag_cmd, "-a", category_tag, str(final_cloud_path)], 
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except: pass
+
+            # 4. Limpeza
+            try:
+                os.unlink(local_renamed)
+                self.logger.info("✨ Limpeza concluída")
+            except OSError:
+                self.logger.warning("⚠️ Upload ok, mas não consegui apagar o local.")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"❌ Erro Crítico: {e}")
+            return False
+
+    def process_file(self, filepath: Path, dry_run: bool = False):
+        if not filepath.exists(): return
+
+        ignore = self.config['ignore']
+        if filepath.is_dir(): return
+        if filepath.suffix.lower() in [e.lower() for e in ignore['extensions']]: return
+        for p in ignore['prefixes']: 
+            if filepath.name.startswith(p): return
+        
+        for data in self.categories.values():
+            if str(data['path']) in str(filepath.parent): return
+
+        self.logger.info(f"🧠 Analisando: {filepath.name}")
+        
+        text = self.extract_content(filepath)
+        if text is None: return 
+        
+        decision = self.get_ai_decision(filepath, text, dry_run)
+        
+        raw_cat = decision.get("category", "outros")
+        category = self._resolve_category_key(raw_cat)
+        
+        if "thought" in decision:
+            self.logger.info(f"💡 Raciocínio: {decision['thought']}")
+
+        raw_name = decision.get("new_name", filepath.name)
+        raw_name = raw_name.replace("'", "").replace('"', "")
+        new_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '', raw_name)
+        if not new_name.lower().endswith(filepath.suffix.lower()): new_name += filepath.suffix
+        
+        target_info = self.categories[category]
+
+        if dry_run:
+            self.logger.info(f"✅ [DRY-RUN] Destino: {target_info['path']} / {new_name}")
+            return
+
+        self._execute_local_first_strategy(filepath, target_info["path"], new_name, target_info["tag"])
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("files", nargs="*", type=Path)
+    parser.add_argument("--config", type=Path, default=Path(__file__).parent.parent / "config.yaml")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    organizer = SmartOrganizer(args.config)
+    if args.files:
+        for f in args.files: organizer.process_file(f, dry_run=args.dry_run)
+
+if __name__ == "__main__":
+    main()
