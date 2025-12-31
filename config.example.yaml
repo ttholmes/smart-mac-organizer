@@ -48,60 +48,71 @@ categories:
   # --- 1. JURÍDICO & BUROCRACIA ---
   juridico:
     path: "{docs}/Juridico"
-    tag: "Purple" # Cores: Red, Orange, Yellow, Green, Blue, Purple, Gray
-    description: "Procon, Processos judiciais, Advogados, Contratos Formais."
+    tag: "Purple"
+    description: "Procon, Processos, Advogados, Boletim de Ocorrência, Intimações, Contratos Formais."
 
   pessoal_documentos:
     path: "{docs}/Pessoal/Documentos_Vitais"
     tag: "Blue"
-    description: "RG, CPF, CNH, Passaporte, Certidões (Nascimento/Casamento), Título de Eleitor."
+    description: "RG, CPF, CNH, Passaporte, Certidões, Título de Eleitor."
 
   # --- 2. SAÚDE ---
   pessoal_saude:
     path: "{docs}/Pessoal/Saude"
     tag: "Blue"
-    description: "Exames médicos, Resultados de Laboratório, Receitas Médicas, Carteira de Vacinação. (NÃO usar para pagamentos/recibos)."
+    description: "Exames, Laboratório, Receitas Médicas, Vacinas. (NÃO pagamentos)."
 
   # --- 3. FINANCEIRO ---
   financeiro_pagamentos:
     path: "{docs}/Financeiro/Pagamentos_Contas"
     tag: "Red"
-    description: "Comprovantes de pagamento, Boletos bancários, Faturas de cartão, Comprovantes de Pix, Contas de luz/água."
+    description: "Comprovantes de pagamento, Boletos, Faturas, Pix, Contas de consumo."
 
   financeiro_fiscal:
     path: "{docs}/Financeiro/Fiscal_Impostos"
     tag: "Red"
-    description: "Declaração de Imposto de Renda, DARF, DAS, Notas Fiscais (NF-e) emitidas."
+    description: "Imposto de Renda, DARF, DAS, Notas Fiscais (NFe)."
 
   financeiro_invest:
     path: "{docs}/Financeiro/Banco_Investimentos"
     tag: "Red"
-    description: "Extratos bancários, Informes de Rendimentos, Comprovantes de Ações/Cripto."
+    description: "Extratos bancários, Informes de Rendimentos, Investimentos."
 
   # --- 4. CARREIRA ---
   carreira_geral:
     path: "{docs}/Profissional/Geral"
     tag: "Green"
-    description: "Holerites, Contracheques, Contratos de Trabalho, Currículos, Certificados."
+    description: "Holerites, Contratos de Trabalho, Currículos."
 
-  # --- 5. SOFTWARES & INSTALADORES ---
+  # --- 5. MÍDIA  ---
+  midia_imagens:
+    path: "{drive}/Imagens/Organizadas"
+    tag: "Yellow"
+    description: "Fotos, Screenshots, Wallpapers, Imagens sem texto documental relevante."
+
+  # --- 6. SOFTWARES ---
   softwares:
     path: "{drive}/Softwares_Backups"
     tag: "Yellow"
-    description: "Instaladores de programas Mac (.dmg, .pkg), arquivos ISO, Drivers e executáveis."
+    description: "Instaladores de Mac (.dmg, .pkg), ISOs, ZIPs de programas e drivers."
 
-  # --- 6. MÍDIA ---
-  midia_imagens:
-    path: "{imgs}/Organizadas"
-    tag: "Yellow"
-    description: "Fotos pessoais, Capturas de tela (Screenshots), Wallpapers, Imagens sem texto documental importante."
+  # --- 7. CONTEÚDO TÉCNICO / PROFISSIONAL ---
+  profissional_tecnico:
+    path: "{docs}/Profissional/Conteudo_Tecnico"
+    tag: "Orange"
+    description: "Materiais técnicos e profissionais em geral: tecnologia, engenharia, negócios, marketing, gestão, apresentações, infográficos explicativos, whitepapers."
 
-  # --- 7. OUTROS (Caixa de Entrada) ---
-  # Tudo que a IA não tiver certeza vai para cá para sua revisão manual.
+  # --- 8. EDUCAÇÃO / ESTUDOS ---
+  educacao_estudos:
+    path: "{docs}/Educacao/Estudos"
+    tag: "Green"
+    description: "Artigos acadêmicos, apostilas, provas, simulados, resumos de estudo, materiais de cursos online, certificados de conclusão."
+
+  # --- 9. OUTROS (Fallback) ---
   outros:
     path: "{drive}/Inbox_Triagem"
     tag: "Gray"
-    description: "Arquivos não identificados, genéricos ou que precisam de revisão humana."
+    description: "Arquivos não identificados ou que precisam de revisão manual."
 
 # ==============================================================================
 # 🚫 FILTROS (O que ignorar)
